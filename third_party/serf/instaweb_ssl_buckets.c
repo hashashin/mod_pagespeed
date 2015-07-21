@@ -1212,6 +1212,9 @@ apr_status_t serf_ssl_set_hostname(serf_ssl_context_t *context,
                                    const char * hostname)
 {
 #ifdef SSL_set_tlsext_host_name
+    if (!context->ssl) {
+      return APR_EGENERAL;
+    }
     if (SSL_set_tlsext_host_name(context->ssl, hostname) != 1) {
         ERR_clear_error();
     }
@@ -1283,7 +1286,6 @@ apr_status_t serf_ssl_trust_cert(
 
     return result ? APR_SUCCESS : APR_EGENERAL;
 }
-
 
 serf_bucket_t *serf_bucket_ssl_decrypt_create(
     serf_bucket_t *stream,

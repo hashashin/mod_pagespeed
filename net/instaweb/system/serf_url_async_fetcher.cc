@@ -290,24 +290,31 @@ class SerfFetch : public PoolElement<SerfFetch> {
     *read_bkt = serf_bucket_socket_create(socket, fetch->bucket_alloc_);
 #if SERF_HTTPS_FETCHING
     apr_status_t status = APR_SUCCESS;
+    GoogleString certs_dir, certs_file;
     if (fetch->using_https_) {
       *read_bkt = serf_bucket_ssl_decrypt_create(*read_bkt,
                                                  fetch->ssl_context_,
                                                  fetch->bucket_alloc_);
+      int count = 0;
       if (fetch->ssl_context_ == NULL) {
+        count |= 1;
         fetch->ssl_context_ = serf_bucket_ssl_decrypt_context_get(*read_bkt);
         if (fetch->ssl_context_ == NULL) {
+          count |= 1<<1;
           status = APR_EGENERAL;
         } else {
+          count |= 1<<2 ;
           SerfUrlAsyncFetcher* fetcher = fetch->fetcher_;
-          const GoogleString& certs_dir = fetcher->ssl_certificates_dir();
-          const GoogleString& certs_file = fetcher->ssl_certificates_file();
+          certs_dir = fetcher->ssl_certificates_dir();
+          certs_file = fetcher->ssl_certificates_file();
 
           if (!certs_file.empty()) {
+            count |= 1<<3;
             status = serf_ssl_set_certificates_file(
                 fetch->ssl_context_, certs_file.c_str());
           }
           if ((status == APR_SUCCESS) && !certs_dir.empty()) {
+            count |= 1<<4;
             status = serf_ssl_set_certificates_directory(fetch->ssl_context_,
                                                          certs_dir.c_str());
           }
@@ -315,6 +322,7 @@ class SerfFetch : public PoolElement<SerfFetch> {
           // If no explicit file or directory is specified, then use the
           // compiled-in default.
           if (certs_dir.empty() && certs_file.empty()) {
+            count |= 1<<5;
             status = serf_ssl_use_default_certificates(fetch->ssl_context_);
           }
         }
@@ -330,7 +338,17 @@ class SerfFetch : public PoolElement<SerfFetch> {
                                               SSLCertError, SSLCertChainError,
                                               fetch);
 
-      serf_ssl_set_hostname(fetch->ssl_context_, fetch->sni_host_);
+      status = serf_ssl_set_hostname(fetch->ssl_context_, fetch->sni_host_);
+      if (status != APR_SUCCESS) {
+        GoogleString err_status = StringPrintf("ctx: %p\n", fetch->ssl_context_);
+        LOG(FATAL) << "BUG: SSL Context NULL pointer dereference!"
+                   << fetch->DebugInfo() << " (" << fetch
+                   << ").  Please report this "
+                   << "at https://github.com/pagespeed/ngx_pagespeed/issues/992"
+                   << err_status << " - path - " << count << " certs_dir "
+                   << certs_dir << " certs_file " << certs_file;
+        return APR_EGENERAL;
+      }
       *write_bkt = serf_bucket_ssl_encrypt_create(*write_bkt,
                                                   fetch->ssl_context_,
                                                   fetch->bucket_alloc_);
